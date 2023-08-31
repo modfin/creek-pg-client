@@ -1,0 +1,36 @@
+version: "3.0"
+
+services:
+  creek-pg-client:
+    build:
+      dockerfile: Dockerfile.dev
+      context: .
+      args:
+        UID: ${UID}
+        USER: ${USER}
+    environment:
+      LOG_LEVEL: "info" # Log level
+      NATS_URI: "nats://nats-server:4222" # NATS url
+      NATS_NAME_SPACE: "CREEK" # Name of the NATS JetStream Stream
+      DB_URI: "postgres://pglogrepl:secret@host.docker.internal/pglogrepl"
+      TABLES: ""
+      PROMETHEUS_PORT: "7778"
+    volumes:
+      - .:/go/src/creek-pg-client
+      - ../creek:/go/src/creek
+      - gopkg:/go/pkg
+    networks: ["creek"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "7778:7778"
+
+volumes:
+  gopkg:
+
+
+networks:
+  creek:
+    name: creek
+    driver: bridge
+    external: true
