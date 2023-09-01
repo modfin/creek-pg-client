@@ -7,11 +7,11 @@ require (
 	github.com/docker/docker v24.0.5+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/hamba/avro/v2 v2.15.1-0.20230829111833-9a35d44ec666
-	github.com/jackc/pglogrepl v0.0.0-20230810221841-d0818e1fbef7
+	github.com/jackc/pglogrepl v0.0.0-20230826184802-9ed16cb201f6
 	github.com/jackc/pgx/v5 v5.4.3
 	github.com/lib/pq v1.10.9
-	github.com/modfin/creek v0.0.0-20230825080751-915eed6ac91f
-	github.com/modfin/henry v0.0.0-20230815085000-703baac7f2b2
+	github.com/modfin/creek v0.0.0-20230901073042-38f5909e96a1
+	github.com/modfin/henry v0.0.0-20230824150253-35f12224ee68
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/prometheus/client_golang v1.16.0
 	github.com/schollz/progressbar/v3 v3.13.1
@@ -37,7 +37,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/uuid v1.3.0 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.5 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.6 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect

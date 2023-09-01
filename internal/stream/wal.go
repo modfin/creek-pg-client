@@ -104,7 +104,7 @@ func (w *walStream) init() error {
 	w.lsn = lsn
 	w.ts = ts
 
-	w.wal, streamErr = w.conn.SteamWALFrom(w.ctx, w.source.DB(), w.source.Name(), ts.Add(-beforeTime), lsn)
+	w.wal, streamErr = w.conn.StreamWALFrom(w.ctx, w.source.DB(), w.source.Name(), ts.Add(-beforeTime), lsn)
 
 	if streamErr != nil {
 		return fmt.Errorf("failed to stream wal for table %s: %v", w.source, err)
