@@ -1,11 +1,12 @@
-FROM golang:1.20-alpine as builder
+FROM golang:1.24-alpine as builder
 
-COPY . /go/src/creek
-WORKDIR /go/src/creek
+COPY . /creek-pg-client
+WORKDIR /creek-pg-client
 
 RUN go mod download
 RUN go build -o /clientd cmd/clientd.go
 
-FROM alpine
+FROM --platform=linux/amd64 alpine:3.21.3
+
 COPY --from=builder /clientd /
-ENTRYPOINT [ "/clientd", "serve" ]
+ENTRYPOINT [ "/clientd" ]

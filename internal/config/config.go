@@ -3,15 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"io"
 	"strings"
-	"sync"
-
-	"github.com/modfin/creek-pg-client/internal/metrics"
-	"github.com/modfin/creek-pg-client/internal/utils"
-
-	"github.com/sirupsen/logrus"
-	"github.com/urfave/cli/v2"
 )
 
 type SnapMode string
@@ -67,41 +59,18 @@ func (t Target) NS() string {
 }
 
 type Config struct {
-	LogLevel string
+	LogLevel string `cli:"log-level"`
 
-	NatsURI       string
-	NatsNamespace string
-	DbURI         string
-	DbNamespace   string
-	SnapMode      string
-}
+	NatsURI       string   `cli:"nats-uri"`
+	NatsNamespace string   `cli:"nats-namespace"`
+	DbURI         string   `cli:"db-uri"`
+	DbNamespace   string   `cli:"db-namespace"`
+	SnapMode      SnapMode `cli:"snap-mode"`
 
-var cfg Config
-var set sync.Once
+	LogRate  float32 `cli:"log-rate"`
+	LogBurst int     `cli:"log-burst"`
 
-func Get(c *cli.Context) Config {
-	set.Do(func() {
-		cfg.NatsURI = c.String("nats-uri")
-		cfg.NatsNamespace = c.String("nats-namespace")
-		cfg.DbURI = c.String("db-uri")
-		cfg.DbNamespace = c.String("db-namespace")
-
-		logRate := float32(c.Float64("log-rate"))
-		logBurst := c.Int("log-burst")
-
-		ll, err := logrus.ParseLevel(c.String("log-level"))
-		if err != nil {
-			ll = logrus.InfoLevel
-		}
-		limitedWriter := utils.NewRateLimitedWriter(logRate, logBurst, ll)
-		promHook := metrics.MustNewPrometheusHook()
-		logrus.SetLevel(ll)
-		logrus.AddHook(promHook)
-		logrus.AddHook(limitedWriter)
-		logrus.SetOutput(io.Discard)
-	})
-
-	return cfg
+	PrometheusPort int `cli:"prometheus-port"`
 }
 
 func ParseSource(tables string) (s Source, err error) {

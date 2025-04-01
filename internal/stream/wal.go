@@ -110,10 +110,6 @@ func (w *walStream) init() error {
 		return fmt.Errorf("failed to stream wal for table %s: %v", w.source, err)
 	}
 
-	if streamErr != nil {
-		return fmt.Errorf("failed to set stream active for %s: %v", w.source, err)
-	}
-
 	return nil
 }
 

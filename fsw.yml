@@ -5,7 +5,7 @@ triggers:
       - '**/*.go'
     env:
       DEBUG: '1'
-    cmd: cd /go/src/creek-pg-client && go run ./cmd/clientd.go serve
+    cmd: go run ./cmd/clientd.go serve
     shell: true
     delay: 100ms
     stop_timeout: 500ms
