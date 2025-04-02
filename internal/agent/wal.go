@@ -1,4 +1,4 @@
-package stream
+package agent
 
 import (
 	"context"
@@ -41,14 +41,14 @@ type walStream struct {
 
 	ctrlChan chan command
 
-	wal  *creek.WALStream
-	conn *creek.Conn
-	db   *dao.DB
+	wal    *creek.WALStream
+	client *creek.Client
+	db     *dao.DB
 
 	doneChan chan struct{}
 }
 
-func (s *Stream) streamTable(ctx context.Context, source config.Source, target config.Target) (ws *walStream, err error) {
+func (s *Agent) streamTable(ctx context.Context, source config.Source, target config.Target) (ws *walStream, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	ws = &walStream{
@@ -60,7 +60,7 @@ func (s *Stream) streamTable(ctx context.Context, source config.Source, target c
 		ctrlChan: make(chan command, 1),
 		wal:      nil,
 		db:       s.db,
-		conn:     s.conn,
+		client:   s.client,
 		ts:       time.Time{},
 		skipTo:   pglogrepl.LSN(0),
 		doneChan: make(chan struct{}),
@@ -104,7 +104,7 @@ func (w *walStream) init() error {
 	w.lsn = lsn
 	w.ts = ts
 
-	w.wal, streamErr = w.conn.StreamWALFrom(w.ctx, w.source.DB(), w.source.Name(), ts.Add(-beforeTime), lsn)
+	w.wal, streamErr = w.client.StreamWALFrom(w.ctx, w.source.DB(), w.source.Name(), ts.Add(-beforeTime), lsn)
 
 	if streamErr != nil {
 		return fmt.Errorf("failed to stream wal for table %s: %v", w.source, err)

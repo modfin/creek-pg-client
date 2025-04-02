@@ -1,4 +1,4 @@
-package stream
+package agent
 
 import (
 	"context"
@@ -13,24 +13,28 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func (s *Stream) getLastSnapReader(ctx context.Context, source config.Source) (*creek.SnapshotReader, error) {
+func (s *Agent) getLastSnapReader(ctx context.Context, source config.Source) (*creek.SnapshotReader, func(), error) {
 	var snapData *creek.SnapshotReader
 	var err error
+	close := func() {}
 
-	snaps, err := s.conn.ListSnapshots(ctx, source.DB(), source.Name())
+	snaps, err := s.client.ListSnapshots(ctx, source.DB(), source.Name())
 	if err != nil {
-		return nil, err
+		return nil, close, err
 	}
 	if len(snaps) == 0 {
-		return nil, errors.New("no snapshots exist")
+		return nil, close, errors.New("no snapshots exist")
 	}
 
-	snapData, err = s.conn.GetSnapshot(ctx, snaps[len(snaps)-1].Name)
+	snapData, close, err = s.client.GetSnapshot(ctx, snaps[len(snaps)-1].Name)
+	if err != nil {
+		return nil, close, err
+	}
 
-	return snapData, err
+	return snapData, close, nil
 }
 
-func (s *Stream) saveSnapshot(mode config.SnapMode, data *creek.SnapshotReader, source config.Source, target config.Target) (err error) {
+func (s *Agent) saveSnapshot(mode config.SnapMode, data *creek.SnapshotReader, source config.Source, target config.Target) (err error) {
 	s.snapWg.Add(1)
 	defer s.snapWg.Done()
 

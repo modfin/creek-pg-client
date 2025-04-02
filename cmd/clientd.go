@@ -11,11 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/modfin/clix"
+	"github.com/modfin/henry/mapz"
 	"github.com/modfin/henry/slicez"
 
 	"github.com/modfin/creek"
+	"github.com/modfin/creek-pg-client/internal/agent"
 	"github.com/modfin/creek-pg-client/internal/metrics"
-	"github.com/modfin/creek-pg-client/internal/stream"
 	"github.com/modfin/creek-pg-client/internal/utils"
 	"github.com/modfin/henry/chanz"
 	"github.com/olekukonko/tablewriter"
@@ -232,6 +234,7 @@ func RemoveTables(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
+// TODO: confusing name
 func AddTables(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args().Slice()
 	if len(args) != 1 {
@@ -289,7 +292,7 @@ func ListTables(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	streams, err := db.GetActiveStreams()
+	activeStreams, err := db.GetActiveStreams()
 	if err != nil {
 		return err
 	}
@@ -297,8 +300,10 @@ func ListTables(ctx context.Context, cmd *cli.Command) error {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetAutoWrapText(false)
 	table.SetHeader([]string{"Source", "Target"})
-	for target, source := range streams {
-		table.Append([]string{source.String(), target.String()})
+	for _, streams := range activeStreams {
+		for source, target := range streams {
+			table.Append([]string{source.String(), target.String()})
+		}
 	}
 
 	table.Render()
@@ -347,7 +352,7 @@ func ApplySnapshot(ctx context.Context, cmd *cli.Command) error {
 
 	args := cmd.Args().Slice()
 	if len(args) != 1 {
-		return cli.Exit("Please provide a source and target table", 1)
+		return fmt.Errorf("please provide a source and target table")
 	}
 
 	cfg, err := initAndVerifyConfig(cmd)
@@ -355,27 +360,22 @@ func ApplySnapshot(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	mappings := make(map[config.Source]config.Target)
 	source, target, err := config.ParseTable(args[0])
 	if err != nil {
-		return cli.Exit("Failed to parse source and target table", 1)
+		return fmt.Errorf("failed to parse source and target table: %w", err)
 	}
-	mappings[source] = target
 
 	db, err := dao.New(dbCtx, cfg.DbURI)
 	if err != nil {
-		logrus.Panicln("failed to initialize database: ", err)
+		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	logrus.Info("successfully connected to database")
 
-	creekStream, err := stream.NewStream(ctx, *cfg, db)
-	if err != nil {
-		return err
-	}
+	creekStream := agent.NewStream(ctx, *cfg, source.DB(), db)
 
 	_, err = creekStream.ApplySnapshot(cfg.SnapMode, source, target, cmd.String("name"))
 	if err != nil {
-		logrus.Errorf("failed to take snapshot: %v", err)
+		return fmt.Errorf("failed to take snapshot: %w", err)
 	}
 
 	allDone := chanz.EveryDone(
@@ -425,21 +425,28 @@ func TakeSnapshot(ctx context.Context, cmd *cli.Command) error {
 	}
 	logrus.Info("successfully connected to database")
 
-	creekStream, err := stream.NewStream(ctx, *cfg, db)
-	if err != nil {
-		return err
-	}
+	streams := make(map[config.Target]*agent.Agent)
 
 	for target, source := range mappings {
-		_, err = creekStream.NewSnapshot(cfg.SnapMode, source, target)
+		// TODO: cleanup the created streams
+		streams[target] = agent.NewStream(ctx, *cfg, source.DB(), db)
+		_, err = streams[target].NewSnapshot(cfg.SnapMode, source, target)
 		if err != nil {
 			logrus.Errorf("failed to take snapshot: %v", err)
 		}
 	}
 
+	snapsDone := chanz.EveryDone(slicez.Map(mapz.Values(streams), func(a *agent.Agent) <-chan struct{} {
+		return a.SnapsDone()
+	})...)
+
+	streamsDone := chanz.EveryDone(slicez.Map(mapz.Values(streams), func(a *agent.Agent) <-chan struct{} {
+		return a.Done()
+	})...)
+
 	allDone := chanz.EveryDone(
 		ctx.Done(),
-		creekStream.Done(),
+		streamsDone,
 	)
 
 	for {
@@ -447,8 +454,10 @@ func TakeSnapshot(ctx context.Context, cmd *cli.Command) error {
 		case <-allDone:
 			dbCancel()
 			return nil
-		case <-creekStream.SnapsDone():
+		case <-snapsDone:
 			cancel()
+		case <-time.After(2 * time.Second):
+			logrus.Info("waiting for snapshots to complete")
 		}
 	}
 }
@@ -480,12 +489,8 @@ func CreateSchemas(ctx context.Context, cmd *cli.Command) error {
 	}
 	logrus.Info("successfully connected to database")
 
-	creekStream, err := stream.NewStream(ctx, *cfg, db)
-	if err != nil {
-		return err
-	}
-
 	for source, target := range mappings {
+		creekStream := agent.NewStream(ctx, *cfg, source.DB(), db)
 		err = creekStream.CreateSchema(ctx, source, target)
 		if err != nil {
 			logrus.Errorf("failed to create schema %s: %v", target.Name(), err)
@@ -514,35 +519,43 @@ func Serve(ctx context.Context, cmd *cli.Command) error {
 
 	go metrics.Start(ctx, cfg.PrometheusPort)
 
-	creekStream, err := stream.NewStream(ctx, *cfg, db)
-	if err != nil {
-		return err
-	}
-
-	creekStream.StartListenAPI()
-
-	streams, err := db.GetActiveStreams()
+	activeStreams, err := db.GetActiveStreams()
 	if err != nil {
 		return fmt.Errorf("failed to get active streams: %w", err)
 	}
 
-	for target, source := range streams {
-		err := creekStream.AddWALTable(ctx, source, target)
-		if err != nil {
-			logrus.Errorf("failed to start streaming wal for table %s", target)
+	// one stream per target db
+	// this wont accept new tables from new dbs when started
+	streams := make(map[string]*agent.Agent)
+
+	for sourceDb, dbStreams := range activeStreams {
+		streams[sourceDb] = agent.NewStream(ctx, *cfg, sourceDb, db)
+		streams[sourceDb].StartListenAPI()
+
+		for source, target := range dbStreams {
+			err := streams[sourceDb].AddWALTable(ctx, source, target)
+			if err != nil {
+				logrus.Errorf("failed to start streaming wal for table %s", target)
+			}
 		}
+		// TODO: handle all streams
+
 	}
+
+	streamsDone := chanz.EveryDone(slicez.Map(mapz.Values(streams), func(a *agent.Agent) <-chan struct{} {
+		return a.Done()
+	})...)
 
 	allDone := chanz.EveryDone(
 		ctx.Done(),
-		creekStream.Done(),
+		streamsDone,
 	)
 
 	for {
 		select {
 		case <-allDone:
 			cancel()
-			os.Exit(0)
+			return nil
 		}
 	}
 }

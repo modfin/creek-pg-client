@@ -1,4 +1,4 @@
-package stream
+package agent
 
 import (
 	"context"
@@ -18,22 +18,32 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type Stream struct {
+// TODO: rename and create a map that holds one stream per source db and can append when the API adds a new source db
+type Agent struct {
 	ctx context.Context
 	db  *dao.DB
 
 	client *creek.Client
-	conn   *creek.Conn
 
 	bar *progressbar.ProgressBar
 
-	lock       sync.RWMutex
-	walStreams map[config.Target]*walStream
+	lock sync.RWMutex
+
+	// one nats connection per target
+
+	clients map[string]*creek.Client
+
+	walStreams map[SubscriptionKey]*walStream
 
 	snapWg sync.WaitGroup
 
 	isClosed  chan struct{}
 	closeOnce sync.Once
+}
+
+type SubscriptionKey struct {
+	Source config.Source
+	Target config.Target
 }
 
 type logrusLogger struct {
@@ -64,26 +74,20 @@ func (l *logrusLogger) Error(format string, args ...interface{}) {
 	l.logger.Errorf(format, args...)
 }
 
-func NewStream(ctx context.Context, cfg config.Config, db *dao.DB) (*Stream, error) {
+func NewStream(ctx context.Context, cfg config.Config, targetDb string, db *dao.DB) *Agent {
 	log := newLogger(cfg.LogLevel)
 
-	client := creek.NewClient(cfg.NatsURI, cfg.NatsNamespace)
+	client := creek.NewClient(cfg.NatsURI, cfg.NatsNamespace, targetDb)
 	client.WithLogger(log)
-
-	c, err := client.Connect()
-	if err != nil {
-		return nil, err
-	}
 
 	logrus.Info("successfully connected to creek")
 
-	s := Stream{
+	s := Agent{
 		ctx:        ctx,
 		db:         db,
-		walStreams: make(map[config.Target]*walStream),
 		lock:       sync.RWMutex{},
 		client:     client,
-		conn:       c,
+		walStreams: make(map[config.Target]*walStream),
 		isClosed:   make(chan struct{}),
 	}
 
@@ -94,20 +98,21 @@ func NewStream(ctx context.Context, cfg config.Config, db *dao.DB) (*Stream, err
 		}
 	}()
 
-	return &s, err
+	return &s
 }
 
-func (s *Stream) StartListenAPI() {
+func (s *Agent) StartListenAPI() {
 	apiCalls := s.db.StartAPI()
 	go s.apiHandler(apiCalls)
 }
 
-func (s *Stream) NewSnapshot(mode config.SnapMode, source config.Source, target config.Target) (heder creek.SnapshotHeader, err error) {
+func (s *Agent) NewSnapshot(mode config.SnapMode, source config.Source, target config.Target) (heder creek.SnapshotHeader, err error) {
 
-	data, err := s.conn.Snapshot(s.ctx, source.DB(), source.Name())
+	data, close, err := s.client.Snapshot(s.ctx, source.DB(), source.Name())
 	if err != nil {
 		return
 	}
+	defer close()
 
 	logrus.Infof("taking new snapshot of table %s at %s", source, data.Header().At)
 
@@ -116,22 +121,25 @@ func (s *Stream) NewSnapshot(mode config.SnapMode, source config.Source, target 
 	return data.Header(), err
 }
 
-func (s *Stream) ApplySnapshot(mode config.SnapMode, source config.Source, target config.Target, snapTopic string) (header creek.SnapshotHeader, err error) {
+func (s *Agent) ApplySnapshot(mode config.SnapMode, source config.Source, target config.Target, snapTopic string) (header creek.SnapshotHeader, err error) {
 
 	logrus.Infof("applying snapshot %s of table %s", snapTopic, source)
-	data, err := s.conn.GetSnapshot(s.ctx, snapTopic)
+	data, close, err := s.client.GetSnapshot(s.ctx, snapTopic)
 	if err != nil {
 		return
 	}
+	defer close()
 
 	err = s.saveSnapshot(mode, data, source, target)
 
 	return data.Header(), err
 }
 
-func (s *Stream) AddWALTable(ctx context.Context, source config.Source, target config.Target) error {
+func (s *Agent) AddWALTable(ctx context.Context, source config.Source, target config.Target) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
+	// TODO set walstreams at the end
 	if _, ok := s.walStreams[target]; ok {
 		return nil
 	}
@@ -147,11 +155,10 @@ func (s *Stream) AddWALTable(ctx context.Context, source config.Source, target c
 	}
 
 	s.walStreams[target] = ws
-
 	return nil
 }
 
-func (s *Stream) PauseWAL(target config.Target) {
+func (s *Agent) PauseWAL(target config.Target) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	ws, ok := s.walStreams[target]
@@ -161,7 +168,7 @@ func (s *Stream) PauseWAL(target config.Target) {
 	ws.Pause()
 }
 
-func (s *Stream) ResumeWAL(target config.Target, skipToLSN pglogrepl.LSN) {
+func (s *Agent) ResumeWAL(target config.Target, skipToLSN pglogrepl.LSN) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	ws, ok := s.walStreams[target]
@@ -172,7 +179,7 @@ func (s *Stream) ResumeWAL(target config.Target, skipToLSN pglogrepl.LSN) {
 	ws.Resume()
 }
 
-func (s *Stream) RemoveWALTable(target config.Target) error {
+func (s *Agent) RemoveWALTable(target config.Target) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	ws, ok := s.walStreams[target]
@@ -186,7 +193,7 @@ func (s *Stream) RemoveWALTable(target config.Target) error {
 }
 
 // SnapsDone returns a channel that sends a message when all snapshots are finished
-func (s *Stream) SnapsDone() <-chan struct{} {
+func (s *Agent) SnapsDone() <-chan struct{} {
 	snapChan := make(chan struct{})
 	go func() {
 		s.snapWg.Wait()
@@ -196,18 +203,21 @@ func (s *Stream) SnapsDone() <-chan struct{} {
 	return snapChan
 }
 
-func (s *Stream) tryClose() {
+func (s *Agent) tryClose() {
 	s.closeOnce.Do(func() {
 		s.snapWg.Wait()
 		logrus.Info("snaps done")
-		s.conn.Close()
+		// TODO: close all streams
+		for _, ws := range s.walStreams {
+			ws.Close()
+		}
 		logrus.Info("stream done")
 		s.isClosed <- struct{}{}
 	})
 }
 
-func (s *Stream) CreateSchema(ctx context.Context, source config.Source, target config.Target) error {
-	schema, err := s.conn.GetLastSchema(ctx, source.DB(), source.Name())
+func (s *Agent) CreateSchema(ctx context.Context, source config.Source, target config.Target) error {
+	schema, err := s.client.GetLastSchema(ctx, source.DB(), source.Name())
 	if err != nil {
 		return err
 	}
@@ -227,7 +237,7 @@ func (s *Stream) CreateSchema(ctx context.Context, source config.Source, target 
 	return err
 }
 
-func (s *Stream) Done() <-chan struct{} {
+func (s *Agent) Done() <-chan struct{} {
 	walDones := slicez.Map(mapz.Values(s.walStreams), func(a *walStream) <-chan struct{} {
 		return a.Done()
 	})

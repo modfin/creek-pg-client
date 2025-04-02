@@ -190,6 +190,7 @@ github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9Gz0M=
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
+github.com/modfin/clix v1.1.1 h1:wYHjSPHCAt9lZAcRF5DzTCF2+Vv+q/K/ZpGNQtclgUQ=
 github.com/modfin/clix v1.1.1/go.mod h1:Kq2cx4s5tSMId0wfUVSHc22jZJIbTGH5RrEcTLcWMX0=
 github.com/modfin/creek v0.0.0-20230901073042-38f5909e96a1 h1:WmxLtXVgx2R12sD4/LlFlRdhgsPo5m+8D6totgN2Q5U=
 github.com/modfin/creek v0.0.0-20230901073042-38f5909e96a1/go.mod h1:zuMBSAnifcKXve94HwQAI7YkG8szsnksl+jFGq5kKvs=

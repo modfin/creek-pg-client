@@ -1,14 +1,15 @@
-package stream
+package agent
 
 import (
+	"strings"
+
 	"github.com/jackc/pglogrepl"
 	"github.com/modfin/creek-pg-client/internal/config"
 	"github.com/modfin/henry/slicez"
 	"github.com/sirupsen/logrus"
-	"strings"
 )
 
-func (s *Stream) apiHandler(calls <-chan string) {
+func (s *Agent) apiHandler(calls <-chan string) {
 	for call := range calls {
 		spit := strings.SplitN(call, " ", 2)
 		if len(spit) != 2 {

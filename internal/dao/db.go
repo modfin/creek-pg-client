@@ -201,7 +201,7 @@ target=excluded.target, lsn=excluded.lsn, timestamp=excluded.timestamp
 	return err
 }
 
-func (db *DB) GetActiveStreams() (map[config.Target]config.Source, error) {
+func (db *DB) GetActiveStreams() (map[string]map[config.Source]config.Target, error) {
 
 	rows, err := db.pool.Query(db.ctx, `SELECT topic, target FROM _creek_consumer.subscriptions WHERE active=true`)
 	if err != nil {
@@ -209,7 +209,7 @@ func (db *DB) GetActiveStreams() (map[config.Target]config.Source, error) {
 	}
 	defer rows.Close()
 
-	streams := make(map[config.Target]config.Source)
+	streams := make(map[string]map[config.Source]config.Target)
 
 	for rows.Next() {
 		var srcStr string
@@ -230,7 +230,7 @@ func (db *DB) GetActiveStreams() (map[config.Target]config.Source, error) {
 			return nil, err
 		}
 
-		streams[target] = source
+		streams[source.DB()][source] = target
 
 	}
 
